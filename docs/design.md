@@ -49,7 +49,7 @@ Rather than acting as a general-purpose FUSE filesystem or generic HTTP proxy, `
 
 ```
  +-------------------------------------------------------------------------+
- |             Database Process (LAGODB / PostgreSQL Engine)               |
+ |             Database Process (LagoDB / PostgreSQL Engine)               |
  |                                                                         |
  |  +-----------------------+                    +----------------------+  |
  |  | StorageClient         |                    | Local Direct I/O     |  |

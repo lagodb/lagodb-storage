@@ -1,8 +1,13 @@
 # lagodb-storage
 
-A high-performance, user-space object storage caching and transaction staging daemon tailored for **LAGODB** and modern cloud-native analytical database engines.
+[![CI](https://github.com/lagodb/lagodb-storage/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/lagodb/lagodb-storage/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+
+A high-performance, user-space object storage caching and transaction staging daemon tailored for [LagoDB](https://github.com/lagodb/lagodb) and modern cloud-native analytical database engines.
 
 `lagodb-storage` co-locates with database processes to bridge low-latency transactional analytics with scalable cloud object stores (Amazon S3, Google Cloud Storage, Azure Blob, and MinIO). Through **zero-IPC descriptor passing (`SCM_RIGHTS`)**, an intelligent **two-tier cache engine**, and a **path-handoff staging model**, it delivers direct disk throughput for reads and writes while managing object lifecycles asynchronously.
+
+Originally engineered as the core object storage caching and transaction staging subsystem for [LagoDB](https://github.com/lagodb/lagodb), `lagodb-storage` is maintained as an independent, standalone daemon and storage service.
 
 ---
 
@@ -24,7 +29,7 @@ Traditional approaches (such as FUSE filesystems, kernel mounts, or generic HTTP
 
 ```
  +-------------------------------------------------------------------------+
- |             Database Process (LAGODB / PostgreSQL Engine)               |
+ |             Database Process (LagoDB / PostgreSQL Engine)               |
  |                                                                         |
  |  +-----------------------+                    +----------------------+  |
  |  | StorageClient         |                    | Local Direct I/O     |  |
