@@ -9,6 +9,7 @@ use futures::stream::{self, BoxStream, StreamExt};
 use object_store::ObjectStore;
 
 use super::ObjectBackend;
+use super::aws::AwsCredentials;
 use super::config::StoreConfig;
 use super::object_store::ObjectStoreBackend;
 use crate::error::{StorageError, StorageResult};
@@ -16,8 +17,10 @@ use crate::object::{ListEntry, ObjectInfo, ObjectPath};
 
 /// Backend that materializes and caches one object-store client per bucket.
 pub struct ConfiguredObjectBackend {
+    requested_config: Arc<StoreConfig>,
     config: Arc<StoreConfig>,
     stores: RwLock<HashMap<String, BucketStores>>,
+    aws_credentials: Option<Arc<AwsCredentials>>,
 }
 
 #[derive(Clone)]
@@ -27,15 +30,58 @@ struct BucketStores {
 }
 
 impl ConfiguredObjectBackend {
-    pub fn new(config: Arc<StoreConfig>) -> Self {
+    /// Resolves the storage address before clients or cache identities exist.
+    pub async fn new(requested_config: Arc<StoreConfig>) -> Self {
+        let mut config = Arc::clone(&requested_config);
+        let s3 = match requested_config.as_ref() {
+            StoreConfig::S3(config) => {
+                Some((&config.authentication, config.region.as_deref()))
+            }
+            StoreConfig::S3Compatible(config) => {
+                Some((&config.authentication, config.region.as_deref()))
+            }
+            _ => None,
+        };
+        let aws_credentials = if let Some((authentication, region)) = s3 {
+            let provider = match authentication.aws_config() {
+                Some(authentication) => {
+                    Some(Arc::new(AwsCredentials::load(authentication, region).await))
+                }
+                None => None,
+            };
+            // Keep the original Arc when the address is already explicit. Only
+            // a missing S3 region requires a resolved configuration copy.
+            if region.is_none() {
+                let resolved = Some(provider.as_ref().map_or_else(
+                    || "us-east-1".to_owned(),
+                    |provider| provider.region().to_owned(),
+                ));
+                match Arc::make_mut(&mut config) {
+                    StoreConfig::S3(config) => config.region = resolved,
+                    StoreConfig::S3Compatible(config) => config.region = resolved,
+                    _ => unreachable!(
+                        "S3 address resolution only receives S3 configuration"
+                    ),
+                }
+            }
+            provider
+        } else {
+            None
+        };
         Self {
+            requested_config,
             config,
             stores: RwLock::new(HashMap::new()),
+            aws_credentials,
         }
     }
 
     pub(crate) fn config(&self) -> &StoreConfig {
         &self.config
+    }
+
+    pub(crate) fn requested_config(&self) -> &StoreConfig {
+        &self.requested_config
     }
 
     fn stores_for_bucket(&self, bucket: &str) -> StorageResult<BucketStores> {
@@ -49,9 +95,14 @@ impl ConfiguredObjectBackend {
             return Ok(stores);
         }
 
+        let credentials = self.aws_credentials.as_ref();
         let bucket_stores = BucketStores {
-            default: self.config.build_store(bucket)?,
-            upload: self.config.build_upload_store(bucket)?,
+            default: self
+                .config
+                .build_store_with_credentials(bucket, credentials)?,
+            upload: self
+                .config
+                .build_upload_store_with_credentials(bucket, credentials)?,
         };
         let mut stores = self
             .stores

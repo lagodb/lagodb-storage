@@ -1,7 +1,7 @@
 use crate::error::{StorageError, StorageResult};
 
 pub(crate) const MAGIC: u32 = 0x53544731; // STG1
-pub(crate) const VERSION: u16 = 8;
+pub(crate) const VERSION: u16 = 9;
 pub(crate) const KIND_REQUEST: u8 = 1;
 pub(crate) const KIND_RESPONSE: u8 = 2;
 

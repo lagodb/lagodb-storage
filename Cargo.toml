@@ -18,6 +18,10 @@ include = ["src/**/*", "src/*", "docs/**/*", "Cargo.toml", "LICENSE", "README.md
 doctest = false
 
 [dependencies]
+aws-config = "1.11.0"
+aws-credential-types = "1.3.0"
+aws-types = "1.5.0"
+serde = { version = "1", features = ["derive"] }
 arc-swap = "1"
 byteorder = "1.4"
 bytes = "1"

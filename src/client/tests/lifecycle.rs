@@ -1,4 +1,5 @@
 use super::*;
+use crate::backend::{AwsCredentialConfig, AwsCredentialSource, S3Authentication};
 
 #[tokio::test]
 async fn dropping_storage_file_closes_server_handle_best_effort() {
@@ -182,17 +183,27 @@ async fn cached_bytes_are_shared_across_credentials_for_one_physical_identity() 
     let config_a = StoreConfig::S3Compatible(S3CompatibleStoreConfig {
         endpoint: "http://127.0.0.1:9".to_string(),
         region: Some("us-east-1".to_string()),
-        access_key_id: Some(SecretString::new("access-a")),
-        secret_access_key: Some(SecretString::new("secret-a")),
-        token: None,
+        authentication: S3Authentication::Aws(AwsCredentialConfig {
+            source: AwsCredentialSource::AccessKey {
+                access_key_id: SecretString::new("access-a"),
+                secret_access_key: SecretString::new("secret-a"),
+                token: None,
+            },
+            assume_role: None,
+        }),
         allow_http: true,
         virtual_hosted_style_request: false,
-        skip_signature: false,
         encryption: None,
     });
     let config_b = StoreConfig::S3Compatible(S3CompatibleStoreConfig {
-        access_key_id: Some(SecretString::new("access-b")),
-        secret_access_key: Some(SecretString::new("secret-b")),
+        authentication: S3Authentication::Aws(AwsCredentialConfig {
+            source: AwsCredentialSource::AccessKey {
+                access_key_id: SecretString::new("access-b"),
+                secret_access_key: SecretString::new("secret-b"),
+                token: None,
+            },
+            assume_role: None,
+        }),
         ..match config_a.clone() {
             StoreConfig::S3Compatible(config) => config,
             _ => unreachable!(),

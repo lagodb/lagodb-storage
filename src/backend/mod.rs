@@ -24,8 +24,10 @@ use futures::stream::BoxStream;
 use crate::error::{StorageError, StorageResult};
 use crate::object::{ListEntry, ObjectInfo, ObjectPath};
 
+mod aws;
 mod config;
 mod configured;
+mod credentials;
 mod identity;
 mod managed;
 mod memory;
@@ -39,8 +41,12 @@ pub use config::{
     S3StoreConfig, StoreConfig,
 };
 pub(crate) use configured::ConfiguredObjectBackend;
-pub use managed::ManagedStoreRegistry;
+pub use credentials::{
+    AwsAssumeRole, AwsCredentialConfig, AwsCredentialOptions, AwsCredentialSource,
+    S3Authentication,
+};
 pub(crate) use managed::ManagedStoreSlot;
+pub use managed::{ManagedStoreRefresh, ManagedStoreRegistry};
 pub use memory::MemoryObjectBackend;
 pub(crate) use pool::BackendPool;
 pub use probe::StorageProbeResult;

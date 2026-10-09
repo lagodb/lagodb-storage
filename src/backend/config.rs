@@ -8,6 +8,8 @@ use std::sync::Arc;
 
 use object_store::{ObjectStore, RetryConfig};
 
+use super::aws::AwsCredentials;
+use super::credentials::S3Authentication;
 use super::secret::SecretString;
 use crate::error::{StorageError, StorageResult};
 
@@ -31,12 +33,9 @@ pub enum S3Encryption {
 pub struct S3StoreConfig {
     pub region: Option<String>,
     pub endpoint: Option<String>,
-    pub access_key_id: Option<SecretString>,
-    pub secret_access_key: Option<SecretString>,
-    pub token: Option<SecretString>,
+    pub authentication: S3Authentication,
     pub allow_http: bool,
     pub virtual_hosted_style_request: bool,
-    pub skip_signature: bool,
     pub encryption: Option<S3Encryption>,
 }
 
@@ -45,12 +44,9 @@ pub struct S3StoreConfig {
 pub struct S3CompatibleStoreConfig {
     pub endpoint: String,
     pub region: Option<String>,
-    pub access_key_id: Option<SecretString>,
-    pub secret_access_key: Option<SecretString>,
-    pub token: Option<SecretString>,
+    pub authentication: S3Authentication,
     pub allow_http: bool,
     pub virtual_hosted_style_request: bool,
-    pub skip_signature: bool,
     pub encryption: Option<S3Encryption>,
 }
 
@@ -66,35 +62,26 @@ impl S3StoreConfig {
         let Self {
             region,
             endpoint,
-            access_key_id,
-            secret_access_key,
-            token,
+            authentication,
             allow_http,
             virtual_hosted_style_request,
-            skip_signature,
             encryption,
         } = self;
         match endpoint {
             Some(endpoint) => StoreConfig::S3Compatible(S3CompatibleStoreConfig {
                 endpoint,
                 region,
-                access_key_id,
-                secret_access_key,
-                token,
+                authentication,
                 allow_http,
                 virtual_hosted_style_request,
-                skip_signature,
                 encryption,
             }),
             None => StoreConfig::S3(S3StoreConfig {
                 region,
                 endpoint: None,
-                access_key_id,
-                secret_access_key,
-                token,
+                authentication,
                 allow_http,
                 virtual_hosted_style_request,
-                skip_signature,
                 encryption,
             }),
         }
@@ -164,7 +151,15 @@ impl StoreConfig {
         &self,
         bucket: &str,
     ) -> StorageResult<Arc<dyn ObjectStore>> {
-        self.build_store_with_retry(bucket, RetryConfig::default())
+        self.build_store_with_retry(bucket, RetryConfig::default(), None)
+    }
+
+    pub(super) fn build_store_with_credentials(
+        &self,
+        bucket: &str,
+        credentials: Option<&Arc<AwsCredentials>>,
+    ) -> StorageResult<Arc<dyn ObjectStore>> {
+        self.build_store_with_retry(bucket, RetryConfig::default(), credentials)
     }
 
     /// Builds the client used by caller-controlled staging uploads.
@@ -172,25 +167,29 @@ impl StoreConfig {
     /// The database chooses whether to retry a failed command. Disable hidden
     /// SDK retries so one protocol Upload request performs one upload attempt
     /// and returns its ordinary success or failure result to that caller.
-    pub(super) fn build_upload_store(
+    pub(super) fn build_upload_store_with_credentials(
         &self,
         bucket: &str,
+        credentials: Option<&Arc<AwsCredentials>>,
     ) -> StorageResult<Arc<dyn ObjectStore>> {
         let retry = RetryConfig {
             max_retries: 0,
             ..RetryConfig::default()
         };
-        self.build_store_with_retry(bucket, retry)
+        self.build_store_with_retry(bucket, retry, credentials)
     }
 
     fn build_store_with_retry(
         &self,
         bucket: &str,
         retry_config: RetryConfig,
+        credentials: Option<&Arc<AwsCredentials>>,
     ) -> StorageResult<Arc<dyn ObjectStore>> {
         match self {
-            Self::S3(config) => config.build_store(bucket, retry_config),
-            Self::S3Compatible(config) => config.build_store(bucket, retry_config),
+            Self::S3(config) => config.build_store(bucket, retry_config, credentials),
+            Self::S3Compatible(config) => {
+                config.build_store(bucket, retry_config, credentials)
+            }
             Self::Gcs(config) => config.build_store(bucket, retry_config),
             Self::Azure(config) => config.build_store(bucket, retry_config),
         }
@@ -295,13 +294,21 @@ pub(super) fn finish_store_build<O: ObjectStore>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::ManagedStoreRegistry;
+    use crate::backend::{
+        AwsCredentialConfig, AwsCredentialSource, ManagedStoreRegistry,
+    };
 
     #[test]
     fn secret_string_debug_is_redacted() {
         let config = StoreConfig::S3(S3StoreConfig {
-            access_key_id: Some(SecretString::new("AKIA_TEST_VALUE")),
-            secret_access_key: Some(SecretString::new("SECRET_TEST_VALUE")),
+            authentication: S3Authentication::Aws(AwsCredentialConfig {
+                source: AwsCredentialSource::AccessKey {
+                    access_key_id: SecretString::new("AKIA_TEST_VALUE"),
+                    secret_access_key: SecretString::new("SECRET_TEST_VALUE"),
+                    token: None,
+                },
+                assume_role: None,
+            }),
             ..S3StoreConfig::default()
         });
 
@@ -312,25 +319,23 @@ mod tests {
         assert!(debug.contains("<redacted>"));
     }
 
-    #[test]
-    fn replace_managed_config_rejects_invalid_provider_config() {
+    #[tokio::test]
+    async fn upsert_managed_config_rejects_invalid_provider_config() {
         let registry = ManagedStoreRegistry::new();
 
         let error = registry
-            .replace_config(
+            .upsert_config(
                 1,
                 StoreConfig::S3Compatible(S3CompatibleStoreConfig {
                     endpoint: " ".to_string(),
                     region: None,
-                    access_key_id: None,
-                    secret_access_key: None,
-                    token: None,
+                    authentication: S3Authentication::default(),
                     allow_http: false,
                     virtual_hosted_style_request: false,
-                    skip_signature: false,
                     encryption: None,
                 }),
             )
+            .await
             .unwrap_err();
 
         assert!(matches!(&error, StorageError::Configuration { .. }));

@@ -80,6 +80,10 @@ impl<I: CacheIndex + 'static> StorageServer<I> {
         &self.socket_path
     }
 
+    /// Returns a shared handle to the registry used by this server.
+    ///
+    /// This does not create a new registry. Updates through the returned handle
+    /// are visible to the service and to any caller-supplied registry handle.
     pub fn managed_store_registry(&self) -> ManagedStoreRegistry {
         self.service.managed_stores().clone()
     }

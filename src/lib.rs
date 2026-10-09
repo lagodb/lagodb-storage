@@ -18,9 +18,10 @@ mod staging;
 mod transport;
 
 pub use backend::{
-    AzureStoreConfig, GcsStoreConfig, ManagedStoreRegistry, MemoryObjectBackend,
-    ObjectBackend, S3CompatibleStoreConfig, S3Encryption, S3StoreConfig,
-    SecretString, StorageProbeResult, StoreConfig,
+    AwsAssumeRole, AwsCredentialConfig, AwsCredentialOptions, AwsCredentialSource,
+    AzureStoreConfig, GcsStoreConfig, ManagedStoreRefresh, ManagedStoreRegistry,
+    MemoryObjectBackend, ObjectBackend, S3Authentication, S3CompatibleStoreConfig,
+    S3Encryption, S3StoreConfig, SecretString, StorageProbeResult, StoreConfig,
 };
 pub use builder::StorageServerBuilder;
 pub use cache::{

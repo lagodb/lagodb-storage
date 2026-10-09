@@ -49,7 +49,7 @@ pub(crate) struct StorageService<I: CacheIndex> {
 }
 
 impl<I: CacheIndex> StorageService<I> {
-    pub(crate) fn resolve_attach(
+    pub(crate) async fn resolve_attach(
         &self,
         payload: crate::protocol::WireRequestPayload,
     ) -> StorageResult<AttachedStorageContext> {
@@ -59,8 +59,8 @@ impl<I: CacheIndex> StorageService<I> {
                 .resolve(volume_id)
                 .map(AttachedStorageContext::Managed),
             crate::protocol::WireRequestPayload::AttachConfigured { config } => {
-                let identity = BackendDataIdentity::from_config(&config);
-                let backend = self.backend_pool.intern(config)?;
+                let backend = self.backend_pool.intern(config).await?;
+                let identity = BackendDataIdentity::from_config(backend.config());
                 let backend: Arc<dyn crate::backend::ObjectBackend> = backend;
                 Ok(AttachedStorageContext::Configured { identity, backend })
             }
@@ -102,21 +102,27 @@ impl<I: CacheIndex> StorageService<I> {
     ) -> StorageResult<ServiceReply> {
         match command {
             StorageCommand::AttachManaged(command) => {
-                let attached = context.attach(self.resolve_attach(
-                    crate::protocol::WireRequestPayload::AttachManaged {
-                        volume_id: command.volume_id,
-                    },
-                )?)?;
+                let attached = context.attach(
+                    self.resolve_attach(
+                        crate::protocol::WireRequestPayload::AttachManaged {
+                            volume_id: command.volume_id,
+                        },
+                    )
+                    .await?,
+                )?;
                 Ok(ServiceReply::new(CommandOutput::Attach {
                     backend_identity: attached.identity().cache_key().to_owned(),
                 }))
             }
             StorageCommand::AttachConfigured(command) => {
-                let attached = context.attach(self.resolve_attach(
-                    crate::protocol::WireRequestPayload::AttachConfigured {
-                        config: command.config,
-                    },
-                )?)?;
+                let attached = context.attach(
+                    self.resolve_attach(
+                        crate::protocol::WireRequestPayload::AttachConfigured {
+                            config: command.config,
+                        },
+                    )
+                    .await?,
+                )?;
                 Ok(ServiceReply::new(CommandOutput::Attach {
                     backend_identity: attached.identity().cache_key().to_owned(),
                 }))

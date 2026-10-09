@@ -1,4 +1,4 @@
-//! Runtime-owned managed volume slots used only during connection attach.
+//! Runtime-owned managed volume slots and scoped backend refresh batches.
 
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -74,28 +74,30 @@ impl ManagedStoreRegistry {
             .contains_key(&volume_id)
     }
 
-    pub fn replace_config(
+    /// Inserts a managed volume or updates its backend using the shared pool.
+    ///
+    /// Updating an existing volume requires the resolved physical identity to
+    /// remain unchanged. A failed update leaves its current backend in place.
+    pub async fn upsert_config(
         &self,
         volume_id: u64,
         config: StoreConfig,
     ) -> StorageResult<()> {
-        let identity = BackendDataIdentity::from_config(&config);
-        let backend = self.pool.intern(Arc::new(config))?;
+        let backend = self.pool.intern(Arc::new(config)).await?;
+        let identity = BackendDataIdentity::from_config(backend.config());
         self.publish(volume_id, identity, backend)
     }
 
-    /// Rebuilds the configured backend even when the explicit config is unchanged.
+    /// Starts one reconcile's forced refresh batch.
     ///
-    /// This is required for provider default credential chains whose effective
-    /// credential changes outside the persisted volume configuration.
-    pub fn refresh_config(
-        &self,
-        volume_id: u64,
-        config: StoreConfig,
-    ) -> StorageResult<()> {
-        let identity = BackendDataIdentity::from_config(&config);
-        let backend = self.pool.materialize_fresh(Arc::new(config))?;
-        self.publish(volume_id, identity, backend)
+    /// Reuse this batch for all volumes being refreshed by that reconcile.
+    /// Separate batches do not deduplicate backend construction; the caller
+    /// serializes reconciles for this registry.
+    pub fn begin_refresh(&self) -> ManagedStoreRefresh<'_> {
+        ManagedStoreRefresh {
+            registry: self,
+            backends: Vec::new(),
+        }
     }
 
     fn publish(
@@ -160,6 +162,53 @@ impl ManagedStoreRegistry {
     }
 }
 
+/// A single reconcile's batch of newly constructed managed backends.
+///
+/// Equal requested configurations share one new backend within this batch.
+/// Each volume is published independently, retaining its previous backend if
+/// publication fails. Existing operations can keep their old backend `Arc`;
+/// subsequent operations obtain the replacement from the managed slot.
+///
+/// Dropping the batch releases its temporary strong references. Successfully
+/// published backends remain owned by their slots. This batch does not
+/// deduplicate with other concurrent batches or update configured connections.
+pub struct ManagedStoreRefresh<'a> {
+    registry: &'a ManagedStoreRegistry,
+    backends: Vec<Arc<ConfiguredObjectBackend>>,
+}
+
+impl ManagedStoreRefresh<'_> {
+    /// Creates or reuses this batch's new backend and replaces one managed slot's
+    /// backend reference. The previous backend is not modified in place.
+    pub async fn refresh_config(
+        &mut self,
+        volume_id: u64,
+        config: StoreConfig,
+    ) -> StorageResult<()> {
+        let backend = match self
+            .backends
+            .iter()
+            .find(|backend| backend.requested_config() == &config)
+        {
+            Some(backend) => Arc::clone(backend),
+            None => {
+                let backend = self
+                    .registry
+                    .pool
+                    .materialize_fresh(Arc::new(config))
+                    .await?;
+                // A volume's identity conflict must not discard the backend
+                // prepared for other volumes with the same requested config.
+                self.backends.push(Arc::clone(&backend));
+                backend
+            }
+        };
+        // Address resolution can fill in a region absent from the request.
+        let identity = BackendDataIdentity::from_config(backend.config());
+        self.registry.publish(volume_id, identity, backend)
+    }
+}
+
 #[cfg(test)]
 impl ManagedStoreRegistry {
     pub(crate) fn with_shared_backend<B: ObjectBackend + 'static>(
@@ -173,24 +222,4 @@ impl ManagedStoreRegistry {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::backend::S3StoreConfig;
-
-    #[test]
-    fn refresh_config_replaces_the_live_backend() {
-        let registry = ManagedStoreRegistry::new();
-        let config = StoreConfig::S3(S3StoreConfig {
-            region: Some("us-east-1".to_owned()),
-            ..S3StoreConfig::default()
-        });
-        registry.replace_config(1, config.clone()).unwrap();
-        let slot = registry.resolve(1).unwrap();
-        let before = slot.backend();
-
-        registry.refresh_config(1, config).unwrap();
-        let after = slot.backend();
-
-        assert!(!Arc::ptr_eq(&before, &after));
-    }
-}
+mod tests;

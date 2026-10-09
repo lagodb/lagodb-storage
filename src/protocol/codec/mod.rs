@@ -5,8 +5,10 @@
 //! request/response envelopes). The free functions in this module are thin entry points that
 //! delegate to those trait impls.
 
+mod credentials;
 mod header;
 mod message;
+mod store;
 mod traits;
 mod types;
 
@@ -182,3 +184,6 @@ pub(crate) fn encode_read_response_prefix(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod credential_tests;

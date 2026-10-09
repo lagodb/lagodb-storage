@@ -1,5 +1,6 @@
 //! Wrapper that keeps sensitive credential material out of `Debug` output.
 
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Opaque wrapper around a secret credential value.
@@ -7,7 +8,8 @@ use std::fmt;
 /// `Debug` is implemented to redact the inner value so tokens and keys never leak through
 /// tracing, panics, or error reports. Use [`SecretString::expose_secret`] at the call site that
 /// actually needs the raw string.
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct SecretString(String);
 
 impl SecretString {

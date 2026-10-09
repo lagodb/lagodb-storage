@@ -1,3 +1,4 @@
+use crate::backend::{AwsCredentialConfig, AwsCredentialSource, S3Authentication};
 use std::sync::Arc;
 
 use crate::backend::{
@@ -42,14 +43,14 @@ fn decode_rejects_previous_protocol_version() {
         },
     })
     .unwrap();
-    frame[4..6].copy_from_slice(&7_u16.to_be_bytes());
+    frame[4..6].copy_from_slice(&8_u16.to_be_bytes());
 
     let error = decode_request(&frame).unwrap_err();
 
     assert!(
         error
             .diagnostic_message()
-            .contains("unsupported protocol version 7")
+            .contains("unsupported protocol version 8")
     );
 }
 
@@ -113,12 +114,16 @@ fn request_payloads_roundtrip() {
             config: Arc::new(StoreConfig::S3Compatible(S3CompatibleStoreConfig {
                 endpoint: "http://127.0.0.1:9000".to_string(),
                 region: Some("us-east-1".to_string()),
-                access_key_id: Some(SecretString::new("access")),
-                secret_access_key: Some(SecretString::new("secret")),
-                token: None,
+                authentication: S3Authentication::Aws(AwsCredentialConfig {
+                    source: AwsCredentialSource::AccessKey {
+                        access_key_id: SecretString::new("access"),
+                        secret_access_key: SecretString::new("secret"),
+                        token: None,
+                    },
+                    assume_role: None,
+                }),
                 allow_http: true,
                 virtual_hosted_style_request: false,
-                skip_signature: false,
                 encryption: None,
             })),
         },
@@ -286,12 +291,16 @@ fn attach_configured_variants_roundtrip() {
         StoreConfig::S3(S3StoreConfig {
             region: Some("us-west-2".to_string()),
             endpoint: Some("https://s3.us-west-2.amazonaws.com".to_string()),
-            access_key_id: Some(SecretString::new("aws-access")),
-            secret_access_key: Some(SecretString::new("aws-secret")),
-            token: Some(SecretString::new("aws-token")),
+            authentication: S3Authentication::Aws(AwsCredentialConfig {
+                source: AwsCredentialSource::AccessKey {
+                    access_key_id: SecretString::new("aws-access"),
+                    secret_access_key: SecretString::new("aws-secret"),
+                    token: Some(SecretString::new("aws-token")),
+                },
+                assume_role: None,
+            }),
             allow_http: false,
             virtual_hosted_style_request: true,
-            skip_signature: false,
             encryption: Some(S3Encryption::Kms {
                 key_id: Some("kms-key".to_string()),
             }),
@@ -299,12 +308,16 @@ fn attach_configured_variants_roundtrip() {
         StoreConfig::S3Compatible(S3CompatibleStoreConfig {
             endpoint: "http://127.0.0.1:9000".to_string(),
             region: Some("us-east-1".to_string()),
-            access_key_id: Some(SecretString::new("compat-access")),
-            secret_access_key: Some(SecretString::new("compat-secret")),
-            token: None,
+            authentication: S3Authentication::Aws(AwsCredentialConfig {
+                source: AwsCredentialSource::AccessKey {
+                    access_key_id: SecretString::new("compat-access"),
+                    secret_access_key: SecretString::new("compat-secret"),
+                    token: None,
+                },
+                assume_role: None,
+            }),
             allow_http: true,
             virtual_hosted_style_request: false,
-            skip_signature: false,
             encryption: Some(S3Encryption::Custom {
                 key: SecretString::new(
                     "MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=",
@@ -364,7 +377,7 @@ fn request_open_golden_frame() {
         encode_request(&request).unwrap(),
         vec![
             0x53, 0x54, 0x47, 0x31, // magic
-            0x00, 0x08, // version
+            0x00, 0x09, // version
             0x01, // request kind
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x2a, // request id
             0x00, 0x03, // open op
@@ -391,7 +404,7 @@ fn request_read_golden_frame() {
     assert_eq!(
         encode_request(&request).unwrap(),
         vec![
-            0x53, 0x54, 0x47, 0x31, 0x00, 0x08, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x53, 0x54, 0x47, 0x31, 0x00, 0x09, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x2a, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0b, 0x00, 0x00, 0x00,
             0x0d,
@@ -430,7 +443,7 @@ fn response_open_golden_frame() {
     assert_eq!(
         encode_response(&response).unwrap(),
         vec![
-            0x53, 0x54, 0x47, 0x31, 0x00, 0x08, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x53, 0x54, 0x47, 0x31, 0x00, 0x09, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x2a, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x63, 0x01,
         ]
@@ -450,7 +463,7 @@ fn response_read_golden_frame() {
     assert_eq!(
         encode_response(&response).unwrap(),
         vec![
-            0x53, 0x54, 0x47, 0x31, 0x00, 0x08, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x53, 0x54, 0x47, 0x31, 0x00, 0x09, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x2a, 0x00, 0x04, 0x01, 0x00, 0x00, 0x00, 0x03, b'a', b'b',
             b'c',
         ]
@@ -489,7 +502,7 @@ fn response_error_golden_frame() {
     assert_eq!(
         encode_response(&response).unwrap(),
         vec![
-            0x53, 0x54, 0x47, 0x31, 0x00, 0x08, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x53, 0x54, 0x47, 0x31, 0x00, 0x09, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x2a, 0x03, 0xe8, 0x00, 0x01, 0x00, 0x00, 0x00, 0x0e, b'm',
             b'i', b's', b's', b'i', b'n', b'g', b' ', b'b', b'u', b'c', b'k', b'e',
             b't',

@@ -144,7 +144,7 @@ impl<I: CacheIndex> CacheManager<I> {
     /// Install runtime logical usage and delete unclaimed physical payloads with one startup
     /// physical scan and one paged metadata scan.
     ///
-    /// **Production contract:** `StorageServerBuilder::bind` calls this once while the server is
+    /// **Production contract:** `StorageServerBuilder::start` calls this once while the server is
     /// still private, then optional startup-only capacity cleanup, then wraps the manager in `Arc`
     /// and starts the scheduler actor (`sleep` before first run). So recover never races startup
     /// background cleanup on that default path.

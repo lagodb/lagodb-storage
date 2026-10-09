@@ -9,6 +9,44 @@ A high-performance, user-space object storage caching and transaction staging da
 
 Originally engineered as the core object storage caching and transaction staging subsystem for [LagoDB](https://github.com/lagodb/lagodb), `lagodb-storage` is maintained as an independent, standalone daemon and storage service.
 
+S3 backends without explicit credentials or anonymous access use the AWS SDK
+default credential chain. The storage process reads its own environment,
+`~/.aws/config`, `~/.aws/credentials`, and `AWS_PROFILE`; SSO, credential-process,
+web identity, container and instance providers are supported by the SDK chain.
+An explicit backend region overrides AWS region discovery. Otherwise the region
+is resolved before backend publication and cache attachment, using `us-east-1`
+when AWS returns no region. Clients and physical identities use the same resolved
+address; credential refresh keeps it fixed. Bucket clients and
+upload clients share one credential provider, which retains credential expiry
+and caches the converted signing credentials. Discovery runs on the worker's
+async runtime, independently of row decoding and local cache reads. Backend
+configuration remains authoritative for endpoints, addressing and encryption.
+
+
+S3 configuration carries `S3Authentication::Anonymous` or
+`S3Authentication::Aws(AwsCredentialConfig)`. AWS sources are `DefaultChain`,
+`Profile { name }`, and `AccessKey`, with an optional `AwsAssumeRole` containing
+role ARN, external ID and session name. Explicit profiles use the SDK profile
+provider and are not overridden by environment access keys. The SDK implements
+SSO, process credentials, profile role chains and STS; object_store remains the
+file I/O implementation. Profile/AssumeRole sources share the same address
+resolution as the default chain. Backend construction and managed registration
+are asynchronous; neither holds the pool lock during AWS discovery.
+AssumeRole credentials retain their expiry and refresh
+through the same signing provider.
+
+Initial attachment resolves the backend address and configures the SDK source.
+Profile and role are included in configuration equality, and excluded from
+physical data-cache identity.
+Automatic early refresh keeps unexpired cached credentials available to concurrent
+requests and falls back to them on load failure. Missing or expired credentials
+require a successful load; the refresh offset is not an expiration deadline.
+
+`probe_store(bucket, root_prefix)` performs the explicit list/create/read/delete
+probe without consulting the local cache. Its request and boolean result layout
+remain unchanged. Protocol version 9 carries the typed AWS authentication
+configuration.
+
 ---
 
 ## Why lagodb-storage?

@@ -48,7 +48,7 @@ async fn builder_starts_redb_backed_object_store_server() {
     let socket = test_root("socket.sock");
     let server = StorageServerBuilder::new(&socket, &root)
         .with_service_config(StorageServiceConfig::default().with_cache_limits(4, 4))
-        .bind()
+        .start()
         .await
         .unwrap();
     register_test_store(&server, "default", store);
@@ -82,7 +82,45 @@ async fn builder_starts_redb_backed_object_store_server() {
 }
 
 #[tokio::test]
-async fn builder_allows_managed_volume_publication_after_bind() {
+async fn builder_preserves_the_supplied_registry_and_shares_later_changes() {
+    let registry = ManagedStoreRegistry::new();
+    registry
+        .register_backend(
+            TEST_VOLUME_ID,
+            BackendDataIdentity::memory("injected"),
+            Arc::new(ObjectStoreBackend::for_bucket(
+                Arc::new(InMemory::new()),
+                "bucket",
+            )),
+        )
+        .unwrap();
+
+    let root = test_root("cache-injected-registry");
+    let socket = test_root("injected-registry.sock");
+    let server = StorageServerBuilder::new(&socket, &root)
+        .with_managed_store_registry(registry.clone())
+        .start_with_index(InMemoryCacheIndex::new())
+        .await
+        .unwrap();
+    let server_registry = server.managed_store_registry();
+
+    assert!(Arc::ptr_eq(
+        &registry.resolve(TEST_VOLUME_ID).unwrap(),
+        &server_registry.resolve(TEST_VOLUME_ID).unwrap(),
+    ));
+    assert!(Arc::ptr_eq(
+        registry.backend_pool(),
+        server_registry.backend_pool(),
+    ));
+
+    assert!(registry.remove(TEST_VOLUME_ID));
+    assert!(!server_registry.contains(TEST_VOLUME_ID));
+    register_test_store(&server, "replacement", Arc::new(InMemory::new()));
+    assert!(registry.contains(TEST_VOLUME_ID));
+}
+
+#[tokio::test]
+async fn builder_allows_managed_volume_publication_after_start() {
     let store = Arc::new(InMemory::new());
     store
         .put(
@@ -96,7 +134,7 @@ async fn builder_allows_managed_volume_publication_after_bind() {
     let socket = test_root("socket-dynamic-store.sock");
     let server = StorageServerBuilder::new(&socket, &root)
         .with_service_config(StorageServiceConfig::default().with_cache_limits(4, 4))
-        .bind()
+        .start()
         .await
         .unwrap();
     register_test_store(&server, "managed", store);
@@ -137,7 +175,7 @@ async fn builder_applies_open_handle_limit_per_connection() {
         .with_server_config(
             StorageServerConfig::default().with_max_open_handles_per_connection(1),
         )
-        .bind()
+        .start()
         .await
         .unwrap();
     register_test_store(&server, "default", store);
@@ -177,13 +215,13 @@ async fn second_bind_fails_when_unix_socket_already_listening() {
     let socket = test_root("socket-dup.sock");
     let server = StorageServerBuilder::new(&socket, &root_a)
         .with_service_config(StorageServiceConfig::default().with_cache_limits(4, 4))
-        .bind()
+        .start()
         .await
         .unwrap();
 
     let dup = StorageServerBuilder::new(&socket, &root_b)
         .with_service_config(StorageServiceConfig::default().with_cache_limits(4, 4))
-        .bind()
+        .start()
         .await;
 
     match dup {
@@ -198,7 +236,7 @@ async fn second_bind_fails_when_unix_socket_already_listening() {
 }
 
 #[tokio::test]
-async fn builder_can_bind_with_custom_cache_index() {
+async fn builder_can_start_with_custom_cache_index() {
     let store = Arc::new(InMemory::new());
     store
         .put(
@@ -212,7 +250,7 @@ async fn builder_can_bind_with_custom_cache_index() {
     let socket = test_root("socket-custom-index.sock");
     let server = StorageServerBuilder::new(&socket, &root)
         .with_service_config(StorageServiceConfig::default().with_cache_limits(4, 4))
-        .bind_with_index(InMemoryCacheIndex::new())
+        .start_with_index(InMemoryCacheIndex::new())
         .await
         .unwrap();
     register_test_store(&server, "default", store);
@@ -260,7 +298,7 @@ async fn builder_does_not_touch_existing_staging_files_on_startup() {
 
     let server = StorageServerBuilder::new(&socket, &root)
         .with_service_config(StorageServiceConfig::default().with_cache_limits(4, 4))
-        .bind()
+        .start()
         .await
         .unwrap();
 

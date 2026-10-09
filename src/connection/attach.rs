@@ -44,10 +44,10 @@ pub(crate) async fn attach<I: CacheIndex>(
         RequestContext::new(request_id, client_addr, &request.payload);
     let started = Instant::now();
     request_hooks.observer().on_request_start(&request_context);
-    let resolved = request_hooks
-        .policy()
-        .before_dispatch(&request_context)
-        .and_then(|()| service.resolve_attach(request.payload));
+    let resolved = match request_hooks.policy().before_dispatch(&request_context) {
+        Ok(()) => service.resolve_attach(request.payload).await,
+        Err(error) => Err(error),
+    };
     let attached = match resolved {
         Ok(attached) => attached,
         Err(error) => {

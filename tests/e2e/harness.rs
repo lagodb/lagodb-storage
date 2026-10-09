@@ -12,6 +12,7 @@
 //! [`CacheIndexKind::InMemory`], while production-wiring tests use [`CacheIndexKind::Redb`] for
 //! read, staging/upload, delete, concurrent access, and restart recovery.
 
+use lagodb_storage::{AwsCredentialConfig, AwsCredentialSource, S3Authentication};
 use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -245,12 +246,18 @@ impl MinioFixture {
         StoreConfig::S3Compatible(S3CompatibleStoreConfig {
             endpoint: self.endpoint.clone(),
             region: Some(self.config.region.clone()),
-            access_key_id: Some(SecretString::new(self.config.user.clone())),
-            secret_access_key: Some(SecretString::new(self.config.password.clone())),
-            token: None,
+            authentication: S3Authentication::Aws(AwsCredentialConfig {
+                source: AwsCredentialSource::AccessKey {
+                    access_key_id: SecretString::new(self.config.user.clone()),
+                    secret_access_key: SecretString::new(
+                        self.config.password.clone(),
+                    ),
+                    token: None,
+                },
+                assume_role: None,
+            }),
             allow_http: true,
             virtual_hosted_style_request: false,
-            skip_signature: false,
             encryption: None,
         })
     }
@@ -367,18 +374,18 @@ impl ServerFixture {
         match kind {
             CacheIndexKind::InMemory => {
                 let server = builder
-                    .bind_with_index(InMemoryCacheIndex::new())
+                    .start_with_index(InMemoryCacheIndex::new())
                     .await
-                    .expect("failed to bind server (in-memory index)");
+                    .expect("failed to start server (in-memory index)");
                 tokio::spawn(async move {
                     let _ = server.serve_forever().await;
                 })
             }
             CacheIndexKind::Redb => {
                 let server = builder
-                    .bind()
+                    .start()
                     .await
-                    .expect("failed to bind server (redb index)");
+                    .expect("failed to start server (redb index)");
                 tokio::spawn(async move {
                     let _ = server.serve_forever().await;
                 })

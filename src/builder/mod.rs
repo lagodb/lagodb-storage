@@ -14,11 +14,15 @@
 //! Managed volume configuration is supplied through the shared managed registry. Inline
 //! configured contexts are attached by clients when their socket is established.
 //!
-//! [`Self::bind`] / [`Self::bind_with_index`] perform the async startup sequence: directory
-//! creation, cache recovery, optional startup cleanup, and finally socket bind.
+//! [`StorageServerBuilder::start`] / [`StorageServerBuilder::start_with_index`] perform the
+//! async startup sequence: directory creation, cache recovery, optional startup cleanup,
+//! and finally socket bind. Accepting requests is a separate step through
+//! [`StorageServer::serve_until`] or [`StorageServer::serve_forever`].
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+use tokio::task;
 
 use tracing::info;
 
@@ -27,7 +31,7 @@ use crate::cache::{CacheIndex, CacheManager, RedbCacheIndex};
 use crate::config::{
     StorageRuntime, StorageRuntimeConfig, StorageServerConfig, StorageServiceConfig,
 };
-use crate::error::StorageResult;
+use crate::error::{StorageError, StorageResult};
 use crate::request::{
     RequestHooks, RequestObserver, RequestPolicy, TracingRequestObserver,
 };
@@ -55,7 +59,7 @@ mod tests;
 ///         StorageServiceConfig::default()
 ///             .with_max_read_size(1024 * 1024)
 ///     )
-///     .bind()
+///     .start()
 ///     .await?;
 /// ```
 pub struct StorageServerBuilder {
@@ -64,7 +68,7 @@ pub struct StorageServerBuilder {
     db_path: Option<PathBuf>,
     service_config: StorageServiceConfig,
     server_config: StorageServerConfig,
-    registry: ManagedStoreRegistry,
+    registry: Option<ManagedStoreRegistry>,
     request_hooks: RequestHooks,
     runtime: Option<StorageRuntime>,
 }
@@ -73,6 +77,9 @@ pub struct StorageServerBuilder {
 
 impl StorageServerBuilder {
     /// Creates a builder with the required socket path and cache directory.
+    ///
+    /// The managed registry is created during startup only if the caller does
+    /// not supply one through [`Self::with_managed_store_registry`].
     pub fn new(socket_path: impl AsRef<Path>, cache_dir: impl AsRef<Path>) -> Self {
         Self {
             socket_path: socket_path.as_ref().to_path_buf(),
@@ -80,7 +87,7 @@ impl StorageServerBuilder {
             db_path: None,
             service_config: StorageServiceConfig::default(),
             server_config: StorageServerConfig::default(),
-            registry: ManagedStoreRegistry::new(),
+            registry: None,
             request_hooks: RequestHooks::default(),
             runtime: None,
         }
@@ -92,7 +99,10 @@ impl StorageServerBuilder {
         self
     }
 
-    /// Use a caller-supplied [`ManagedStoreRegistry`] instead of the default empty one.
+    /// Uses the caller-supplied [`ManagedStoreRegistry`] when constructing the service.
+    ///
+    /// If none is supplied, startup creates an empty registry. Supplying one
+    /// avoids constructing a separate default registry.
     ///
     /// This lets the embedder pre-populate or share the registry before the
     /// server starts accepting connections, so the first request never observes
@@ -105,7 +115,7 @@ impl StorageServerBuilder {
         mut self,
         registry: ManagedStoreRegistry,
     ) -> Self {
-        self.registry = registry;
+        self.registry = Some(registry);
         self
     }
 }
@@ -195,32 +205,43 @@ impl StorageServerBuilder {
     }
 }
 
-// ---- Bind (async startup) -----------------------------------------------------------------------
+// ---- Start (async startup) -----------------------------------------------------------------------
 
 impl StorageServerBuilder {
-    /// Binds the server with the default [`RedbCacheIndex`].
+    /// Starts the server with the default [`RedbCacheIndex`].
     ///
     /// Performs the full startup sequence: directory creation → cache recovery → optional
-    /// startup cleanup → socket bind.
-    pub async fn bind(mut self) -> StorageResult<StorageServer<RedbCacheIndex>> {
+    /// startup cleanup → socket bind. Call [`StorageServer::serve_until`] or
+    /// [`StorageServer::serve_forever`] on the returned server to accept requests.
+    pub async fn start(mut self) -> StorageResult<StorageServer<RedbCacheIndex>> {
         self.prepare_dirs().await?;
         let db_path = self
             .db_path
             .take()
             .unwrap_or_else(|| self.cache_dir.join("db").join("index.redb"));
-        let index = RedbCacheIndex::open(db_path)?;
-        self.start(index).await
+        // Opening redb and creating its tables perform synchronous disk I/O.
+        // Keep that work off the async worker driving the startup sequence.
+        let index = task::spawn_blocking(move || RedbCacheIndex::open(db_path))
+            .await
+            .map_err(|error| {
+                StorageError::cache_source("cache index startup task failed", error)
+            })??;
+        self.finish_startup(index).await
     }
 
-    /// Binds the server with a caller-supplied [`CacheIndex`] implementation.
+    /// Starts the server with a caller-supplied [`CacheIndex`] implementation.
     ///
-    /// Same startup sequence as [`Self::bind`] but skips redb database creation.
-    pub async fn bind_with_index<I>(self, index: I) -> StorageResult<StorageServer<I>>
+    /// Same startup sequence as [`Self::start`] but skips redb database creation.
+    /// Accepting requests still requires calling a serve method on the returned server.
+    pub async fn start_with_index<I>(
+        self,
+        index: I,
+    ) -> StorageResult<StorageServer<I>>
     where
         I: CacheIndex + 'static,
     {
         self.prepare_dirs().await?;
-        self.start(index).await
+        self.finish_startup(index).await
     }
 
     async fn prepare_dirs(&self) -> StorageResult<()> {
@@ -232,7 +253,7 @@ impl StorageServerBuilder {
     }
 
     /// Assembles and starts the server after its socket and cache directories exist.
-    async fn start<I>(self, index: I) -> StorageResult<StorageServer<I>>
+    async fn finish_startup<I>(self, index: I) -> StorageResult<StorageServer<I>>
     where
         I: CacheIndex + 'static,
     {
@@ -282,6 +303,7 @@ impl StorageServerBuilder {
 
         let staging_uploader = Arc::new(StagingUploader::new(cache_dir));
 
+        let registry = registry.unwrap_or_default();
         let service = Arc::new(StorageService::with_staging_uploader(
             registry,
             cache.clone(),

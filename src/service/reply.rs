@@ -8,6 +8,7 @@
 //! across the wire response so the cache cannot evict a file while the writer is still
 //! streaming from it.
 
+use crate::backend::StorageProbeResult;
 use std::fmt;
 
 #[cfg(test)]
@@ -57,7 +58,7 @@ pub(crate) enum CommandOutput {
     Read(ReadOutput),
     Close,
     Upload(UploadOutput),
-    ProbeStore(crate::backend::StorageProbeResult),
+    ProbeStore(StorageProbeResult),
     InvalidateObjectCache(InvalidateObjectCacheOutput),
     Delete,
     DeletePrefix(DeletePrefixOutput),
