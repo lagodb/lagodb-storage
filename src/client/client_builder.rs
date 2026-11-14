@@ -19,7 +19,8 @@ type ClientBuilderParts = (
     WireRequestPayload,
 );
 
-/// Maximum time spent closing a server-side handle from `Drop`.
+/// Maximum time one cleanup request may take: closing a server-side handle
+/// from `Drop`, or a `*_cleanup` delete.
 ///
 /// This follows PostgreSQL's `postgres_fdw` cleanup budget: cleanup is allowed
 /// to resynchronize a healthy connection, but cannot wait forever.
@@ -81,7 +82,8 @@ impl StorageClientBuilder {
         self
     }
 
-    /// Bounds the best-effort Close RPC issued by `StorageFile::drop`.
+    /// Bounds every cleanup request: the best-effort Close RPCs issued when a
+    /// `StorageFile` or list cursor is dropped, and the `*_cleanup` deletes.
     #[must_use]
     pub fn cleanup_timeout(mut self, timeout: Duration) -> Self {
         self.cleanup_timeout = timeout;

@@ -392,6 +392,28 @@ impl StorageClient {
         }
     }
 
+    /// Deletes a single object as cleanup that cannot be interrupted.
+    ///
+    /// Same result contract as [`Self::delete`], but the exchange waits as
+    /// cleanup: the waiter ignores interrupt delivery and the client's cleanup
+    /// timeout bounds the whole exchange. A timeout or transport failure poisons
+    /// this connection, so later cleanup on it fails immediately instead of
+    /// waiting again.
+    pub fn delete_cleanup(
+        &self,
+        bucket: impl Into<String>,
+        key: impl Into<String>,
+    ) -> StorageResult<()> {
+        let (response, _) = self.request_cleanup(WireRequestPayload::Delete {
+            bucket: bucket.into(),
+            key: key.into(),
+        })?;
+        match response {
+            WireResponsePayload::Delete => Ok(()),
+            other => self.reject_unexpected("delete", &other),
+        }
+    }
+
     /// Deletes every object whose key begins with `prefix`. Returns the number of objects the
     /// backend acknowledged removing.
     ///
@@ -421,6 +443,29 @@ impl StorageClient {
             bucket: bucket.into(),
             prefix: prefix.into(),
         })?;
+        match response {
+            WireResponsePayload::DeletePrefix { deleted } => Ok(deleted),
+            other => self.reject_unexpected("delete-prefix", &other),
+        }
+    }
+
+    /// Deletes every object under `prefix` as cleanup that cannot be interrupted.
+    ///
+    /// Same result contract as [`Self::delete_prefix`], waiting as
+    /// [`Self::delete_cleanup`] does. The cleanup timeout bounds the whole
+    /// call, so a prefix too large to finish in time ends with a timeout that
+    /// poisons this connection. The outcome is then unknown: the server may
+    /// still be deleting, so none, some or all of the objects may be gone.
+    pub fn delete_prefix_cleanup(
+        &self,
+        bucket: impl Into<String>,
+        prefix: impl Into<String>,
+    ) -> StorageResult<u64> {
+        let (response, _) =
+            self.request_cleanup(WireRequestPayload::DeletePrefix {
+                bucket: bucket.into(),
+                prefix: prefix.into(),
+            })?;
         match response {
             WireResponsePayload::DeletePrefix { deleted } => Ok(deleted),
             other => self.reject_unexpected("delete-prefix", &other),

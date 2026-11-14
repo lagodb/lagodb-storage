@@ -15,8 +15,14 @@ pub enum SocketInterest {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SocketWaitContext {
     /// Foreground request I/O may process runtime interrupts.
+    ///
+    /// The client's operation timeout bounds the exchange; by default there is
+    /// no deadline.
     Foreground,
     /// Best-effort cleanup defers runtime interrupts to a later safe point.
+    ///
+    /// The client's cleanup timeout (30 seconds by default) bounds the
+    /// exchange, and a timeout poisons the connection.
     Cleanup,
 }
 
