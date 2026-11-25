@@ -331,8 +331,6 @@ fn message_with_optional_source(
 
 #[cfg(test)]
 mod tests {
-    use std::error::Error as _;
-
     use super::*;
 
     #[test]

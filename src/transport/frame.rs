@@ -100,7 +100,7 @@ pub async fn write_frame<W: AsyncWrite + Unpin>(
 
 #[cfg(test)]
 mod tests {
-    use tokio::io::{AsyncWriteExt as _, duplex};
+    use tokio::io::duplex;
 
     use super::*;
 

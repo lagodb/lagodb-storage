@@ -17,5 +17,5 @@
 
 # Keep local development and CI on the crate's declared minimum Rust version.
 [toolchain]
-channel = "1.97.1"
+channel = "1.99.1"
 components = ["rustfmt", "clippy"]

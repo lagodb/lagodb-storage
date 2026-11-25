@@ -69,7 +69,7 @@ impl ExternalFdPolicy for CountingFdPolicy {
     fn acquire(&self) -> StorageResult<Box<dyn ExternalFdLease>> {
         if let Some(limit) = self.limit {
             self.active
-                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |active| {
+                .try_update(Ordering::SeqCst, Ordering::SeqCst, |active| {
                     (active < limit).then_some(active + 1)
                 })
                 .map_err(|_| {
