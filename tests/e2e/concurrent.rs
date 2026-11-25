@@ -2,7 +2,9 @@
 
 use std::sync::Arc;
 
-use lagodb_storage::{StagingFile, StagingPathResolver, StorageClient};
+use lagodb_storage::{
+    ObjectLocation, StagingFile, StagingPathResolver, StorageClient,
+};
 
 use crate::harness::{CacheIndexKind, E2eHarness, TEST_BUCKET};
 
@@ -124,13 +126,13 @@ async fn concurrent_stage_upload_on(kind: CacheIndexKind) {
                 let key = format!("concurrent-stage/file-{i}.txt");
                 let payload = format!("payload for concurrent file {i}");
 
-                let mut staging = StagingFile::create(
-                    &resolver,
-                    client.backend_identity(),
+                let location = ObjectLocation::new(
+                    client.backend_identity().clone(),
                     TEST_BUCKET,
                     &key,
                 )
                 .unwrap();
+                let mut staging = StagingFile::create(&resolver, &location).unwrap();
                 staging.write(payload.as_bytes()).unwrap();
                 staging.sync().unwrap();
                 drop(staging);

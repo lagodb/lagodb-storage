@@ -118,7 +118,7 @@ mod tests {
     use super::*;
     use crate::backend::{MemoryObjectBackend, ObjectBackend};
     use crate::client::StagingFile;
-    use crate::object::{BackendDataIdentity, ObjectPath};
+    use crate::object::ObjectPath;
 
     static NONCE: AtomicU64 = AtomicU64::new(0);
     const TEST_STORE_ID: &str = "test-store";
@@ -141,13 +141,8 @@ mod tests {
 
     fn create_staging_file(root: PathBuf, key: &str, data: &[u8]) -> PathBuf {
         let resolver = StagingPathResolver::new(root);
-        let mut staging_file = StagingFile::create(
-            &resolver,
-            &BackendDataIdentity::memory(TEST_STORE_ID),
-            "bucket",
-            key,
-        )
-        .unwrap();
+        let location = test_key(key);
+        let mut staging_file = StagingFile::create(&resolver, &location).unwrap();
         staging_file.write(data).unwrap();
         let path = staging_file.path().to_path_buf();
         drop(staging_file);

@@ -7,7 +7,7 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 use crate::error::{StorageError, StorageResult};
-use crate::object::{BackendDataIdentity, ObjectLocation};
+use crate::object::ObjectLocation;
 use crate::staging::StagingPathResolver;
 
 use super::{ExternalFdLease, ExternalFdPolicy};
@@ -62,11 +62,9 @@ impl StagingFile {
     /// `O_APPEND` enforces the documented append-only contract.
     pub fn create(
         resolver: &StagingPathResolver,
-        backend_identity: &BackendDataIdentity,
-        bucket: &str,
-        key: &str,
+        location: &ObjectLocation,
     ) -> StorageResult<Self> {
-        Self::create_inner(resolver, backend_identity, bucket, key, None)
+        Self::create_inner(resolver, location, None)
     }
 
     /// Creates a staging file while accounting for its descriptor through the
@@ -76,24 +74,19 @@ impl StagingFile {
     /// the returned `StagingFile`. An open failure releases it immediately.
     pub fn create_with_fd_policy(
         resolver: &StagingPathResolver,
-        backend_identity: &BackendDataIdentity,
-        bucket: &str,
-        key: &str,
+        location: &ObjectLocation,
         fd_policy: &dyn ExternalFdPolicy,
     ) -> StorageResult<Self> {
         let fd_lease = fd_policy.acquire()?;
-        Self::create_inner(resolver, backend_identity, bucket, key, Some(fd_lease))
+        Self::create_inner(resolver, location, Some(fd_lease))
     }
 
     fn create_inner(
         resolver: &StagingPathResolver,
-        backend_identity: &BackendDataIdentity,
-        bucket: &str,
-        key: &str,
+        location: &ObjectLocation,
         fd_lease: Option<Box<dyn ExternalFdLease>>,
     ) -> StorageResult<Self> {
-        let location = ObjectLocation::new(backend_identity.clone(), bucket, key)?;
-        let path = resolver.path_for(&location)?;
+        let path = resolver.path_for(location)?;
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|error| {
                 StorageError::io(

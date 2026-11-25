@@ -1,6 +1,6 @@
 //! Staging / upload / delete E2E tests.
 
-use lagodb_storage::{SeekFrom, StagingFile, StagingPathResolver};
+use lagodb_storage::{ObjectLocation, SeekFrom, StagingFile, StagingPathResolver};
 
 use crate::harness::{CacheIndexKind, E2eHarness, TEST_BUCKET};
 
@@ -23,13 +23,13 @@ async fn stage_upload_then_read_back_on(kind: CacheIndexKind) {
         let resolver = StagingPathResolver::new(cache_dir);
         let client = h.connect();
 
-        let mut staging = StagingFile::create(
-            &resolver,
-            client.backend_identity(),
+        let location = ObjectLocation::new(
+            client.backend_identity().clone(),
             TEST_BUCKET,
             "staged/object.bin",
         )
         .unwrap();
+        let mut staging = StagingFile::create(&resolver, &location).unwrap();
         staging.write(payload).unwrap();
         staging.sync().unwrap();
         drop(staging);
@@ -59,13 +59,13 @@ async fn caller_unlinks_staging_file_to_discard_without_upload() {
         let resolver = StagingPathResolver::new(cache_dir);
         let client = h.connect();
 
-        let mut staging = StagingFile::create(
-            &resolver,
-            client.backend_identity(),
+        let location = ObjectLocation::new(
+            client.backend_identity().clone(),
             TEST_BUCKET,
             "discarded/file.txt",
         )
         .unwrap();
+        let mut staging = StagingFile::create(&resolver, &location).unwrap();
         staging
             .write(b"these bytes should never reach MinIO")
             .unwrap();
@@ -107,13 +107,13 @@ async fn upload_overwrites_and_readback_sees_new_data_on(kind: CacheIndexKind) {
         assert_eq!(f.read(original.len() as u32).unwrap(), original.as_ref());
         f.close().unwrap();
 
-        let mut staging = StagingFile::create(
-            &resolver,
-            client.backend_identity(),
+        let location = ObjectLocation::new(
+            client.backend_identity().clone(),
             TEST_BUCKET,
             "overwrite.txt",
         )
         .unwrap();
+        let mut staging = StagingFile::create(&resolver, &location).unwrap();
         staging.write(replacement).unwrap();
         drop(staging);
 

@@ -38,13 +38,13 @@ async fn client_stage_write_upload_roundtrip_uploads_to_backend() {
         let resolver = StagingPathResolver::new(staging_root);
         let client =
             StorageClient::connect_managed(&client_socket, TEST_VOLUME_ID).unwrap();
-        let mut staging_file = StagingFile::create(
-            &resolver,
-            client.backend_identity(),
+        let location = ObjectLocation::new(
+            client.backend_identity().clone(),
             "bucket",
             "uploaded.txt",
         )
         .unwrap();
+        let mut staging_file = StagingFile::create(&resolver, &location).unwrap();
         staging_file.write(b"hello ").unwrap();
         staging_file.write(b"upload").unwrap();
         staging_file.sync().unwrap();
@@ -106,13 +106,13 @@ async fn caller_unlinks_staging_file_to_discard_without_upload() {
         let resolver = StagingPathResolver::new(staging_root);
         let client =
             StorageClient::connect_managed(&client_socket, TEST_VOLUME_ID).unwrap();
-        let mut staging_file = StagingFile::create(
-            &resolver,
-            client.backend_identity(),
+        let location = ObjectLocation::new(
+            client.backend_identity().clone(),
             "bucket",
             "discarded.txt",
         )
         .unwrap();
+        let mut staging_file = StagingFile::create(&resolver, &location).unwrap();
         staging_file.write(b"doomed").unwrap();
         let path = staging_file.path().to_path_buf();
         drop(staging_file);
@@ -172,13 +172,9 @@ async fn client_upload_can_be_issued_from_a_different_connection() {
 
     tokio::task::spawn_blocking(move || {
         let resolver = StagingPathResolver::new(staging_root);
-        let mut staging_file = StagingFile::create(
-            &resolver,
-            &test_identity(),
-            "bucket",
-            "cross-conn.txt",
-        )
-        .unwrap();
+        let location =
+            ObjectLocation::new(test_identity(), "bucket", "cross-conn.txt").unwrap();
+        let mut staging_file = StagingFile::create(&resolver, &location).unwrap();
         staging_file.write(b"cross-connection upload").unwrap();
         drop(staging_file);
     })
@@ -211,20 +207,10 @@ async fn stage_twice_without_finalize_returns_busy() {
     let root = test_root("staging-busy-cache");
     tokio::task::spawn_blocking(move || {
         let resolver = StagingPathResolver::new(root);
-        let _first = StagingFile::create(
-            &resolver,
-            &test_identity(),
-            "bucket",
-            "duplicate.txt",
-        )
-        .unwrap();
-        let error = StagingFile::create(
-            &resolver,
-            &test_identity(),
-            "bucket",
-            "duplicate.txt",
-        )
-        .unwrap_err();
+        let location =
+            ObjectLocation::new(test_identity(), "bucket", "duplicate.txt").unwrap();
+        let _first = StagingFile::create(&resolver, &location).unwrap();
+        let error = StagingFile::create(&resolver, &location).unwrap_err();
         assert_eq!(error.kind(), StorageErrorKind::Busy);
     })
     .await
@@ -240,28 +226,18 @@ fn staging_file_holds_external_fd_lease_until_drop() {
         active: Arc::clone(&active_fds),
         limit: None,
     };
+    let location =
+        ObjectLocation::new(test_identity(), "bucket", "accounted.txt").unwrap();
 
-    let staging = StagingFile::create_with_fd_policy(
-        &resolver,
-        &test_identity(),
-        "bucket",
-        "accounted.txt",
-        &policy,
-    )
-    .unwrap();
+    let staging =
+        StagingFile::create_with_fd_policy(&resolver, &location, &policy).unwrap();
     assert_eq!(active_fds.load(Ordering::SeqCst), 1);
 
     drop(staging);
     assert_eq!(active_fds.load(Ordering::SeqCst), 0);
 
-    let error = StagingFile::create_with_fd_policy(
-        &resolver,
-        &test_identity(),
-        "bucket",
-        "accounted.txt",
-        &policy,
-    )
-    .unwrap_err();
+    let error = StagingFile::create_with_fd_policy(&resolver, &location, &policy)
+        .unwrap_err();
     assert_eq!(error.kind(), StorageErrorKind::Busy);
     assert_eq!(active_fds.load(Ordering::SeqCst), 0);
 }
